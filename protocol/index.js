@@ -7,6 +7,11 @@ export const MessageType = {
   ACTION_ERROR: 'action_error',
   ACTION: 'action',
   RESET_MATCH: 'reset_match',
+  QUEUE_JOIN: 'queue_join',
+  QUEUE_LEAVE: 'queue_leave',
+  QUEUE_STATUS: 'queue_status',
+  MATCH_FOUND: 'match_found',
+  RECONNECT_RESUME: 'reconnect_resume',
 };
 
 export const ActionType = {

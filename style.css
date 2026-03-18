@@ -9,6 +9,10 @@ button, select { padding: .45rem .75rem; border-radius: 8px; border: 1px solid #
 #connectionMode.local { color: #f0c676; }
 #rematchBtn { display: none; }
 #rematchBtn.visible { display: inline-block; }
+#leaveQueueBtn { display: none; }
+#leaveQueueBtn.visible { display: inline-block; }
+#queueStatus.in_queue { color: #7ec8ff; }
+#queueStatus.in_match { color: #7ce0a2; }
 #turnTimer.warning { color: #ffd86e; }
 #turnTimer.critical { color: #ff8b8b; animation: timerPulse .7s infinite alternate; }
 

@@ -60,6 +60,7 @@ Completed improvements in the playable MVP:
 - Local dependency-free WebSocket server added for authoritative two-client matches.
 - Shared protocol module added for versioned client/server message types.
 - HUD now shows connection mode/assigned side and exposes rematch/connect controls.
+- Browser client now supports explicit queue join/leave, room IDs, and reconnect resume via stored session IDs.
 
 ## 1) Product goals
 

@@ -1,6 +1,5 @@
 import {
   P1,
-  TURN_SECONDS,
   applyAction,
   buildPathTo,
   calculateDamage,
@@ -21,6 +20,8 @@ import {
 } from './engine/index.js';
 import { ActionType, MessageType, wrapMessage } from './protocol/index.js';
 
+const SESSION_STORAGE_KEY = 'miniwar-session-id';
+
 const boardEl = document.getElementById('board');
 const mapSelectEl = document.getElementById('mapSelect');
 const mapInfoEl = document.getElementById('mapInfo');
@@ -38,7 +39,10 @@ const legendListEl = document.getElementById('legendList');
 const previewInfoEl = document.getElementById('previewInfo');
 const connectionModeEl = document.getElementById('connectionMode');
 const playerSideEl = document.getElementById('playerSide');
+const queueStatusEl = document.getElementById('queueStatus');
 const connectBtnEl = document.getElementById('connectBtn');
+const queueBtnEl = document.getElementById('queueBtn');
+const leaveQueueBtnEl = document.getElementById('leaveQueueBtn');
 const rematchBtnEl = document.getElementById('rematchBtn');
 
 const ui = {
@@ -49,6 +53,10 @@ const ui = {
   connection: 'local',
   socket: null,
   assignedSide: null,
+  queueStatus: 'offline',
+  queueDetail: 'Offline',
+  roomId: null,
+  sessionId: localStorage.getItem(SESSION_STORAGE_KEY),
 };
 
 document.getElementById('endTurnBtn').addEventListener('click', () => performAction({ type: ActionType.END_TURN }));
@@ -56,6 +64,8 @@ document.getElementById('resetBtn').addEventListener('click', () => resetMatch()
 mapSelectEl.addEventListener('change', () => resetMatch(mapSelectEl.value));
 threatToggleEl.addEventListener('change', () => { ui.showThreatMap = threatToggleEl.checked; render(); });
 connectBtnEl.addEventListener('click', () => connectWebSocket(true));
+queueBtnEl.addEventListener('click', () => updateQueue(true));
+leaveQueueBtnEl.addEventListener('click', () => updateQueue(false));
 rematchBtnEl.addEventListener('click', () => resetMatch());
 document.addEventListener('keydown', (event) => { if (event.key.toLowerCase() === 'e') performAction({ type: ActionType.END_TURN }); });
 
@@ -73,6 +83,11 @@ setInterval(() => {
 }, 1000);
 
 function setMessage(msg) { messageEl.textContent = msg; }
+
+function setSessionId(sessionId) {
+  ui.sessionId = sessionId;
+  if (sessionId) localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+}
 
 function initMapSelect() {
   mapSelectEl.innerHTML = Object.entries(maps).map(([key, map]) => `<option value="${key}">${map.name}</option>`).join('');
@@ -94,9 +109,13 @@ function getSelectedUnit() {
   return ui.selectedUnitId ? getUnitById(ui.state, ui.selectedUnitId) : null;
 }
 
+function canControlCurrentTurn() {
+  return ui.connection !== 'remote' || (ui.assignedSide && ui.assignedSide === ui.state.current && ui.roomId);
+}
+
 function performAction(action) {
-  if (ui.connection === 'remote' && ui.assignedSide && ui.assignedSide !== ui.state.current) {
-    setMessage(`Waiting for ${ui.state.current}.`);
+  if (!canControlCurrentTurn()) {
+    setMessage(ui.roomId ? `Waiting for ${ui.state.current}.` : 'Join a match to play online.');
     return;
   }
   if (ui.connection === 'remote' && ui.socket?.readyState === WebSocket.OPEN) {
@@ -114,7 +133,7 @@ function performAction(action) {
 }
 
 function resetMatch(mapKey = ui.state.mapKey) {
-  if (ui.connection === 'remote' && ui.socket?.readyState === WebSocket.OPEN) {
+  if (ui.connection === 'remote' && ui.socket?.readyState === WebSocket.OPEN && ui.roomId) {
     ui.socket.send(JSON.stringify(wrapMessage(MessageType.RESET_MATCH, { mapKey })));
     return;
   }
@@ -124,6 +143,25 @@ function resetMatch(mapKey = ui.state.mapKey) {
   initMapSelect();
   initLegend();
   render();
+}
+
+function updateQueue(joinQueue) {
+  if (!ui.socket || ui.socket.readyState !== WebSocket.OPEN) {
+    connectWebSocket(true, joinQueue);
+    return;
+  }
+  ui.socket.send(JSON.stringify(wrapMessage(joinQueue ? MessageType.QUEUE_JOIN : MessageType.QUEUE_LEAVE)));
+}
+
+function applyQueueStatus(msg) {
+  ui.queueStatus = msg.status ?? 'idle';
+  ui.queueDetail = msg.detail ?? ui.queueDetail;
+  if (msg.roomId) ui.roomId = msg.roomId;
+  queueStatusEl.textContent = ui.queueDetail;
+  queueStatusEl.className = ui.queueStatus;
+  queueBtnEl.disabled = ui.queueStatus === 'in_queue' || ui.queueStatus === 'in_match';
+  leaveQueueBtnEl.classList.toggle('visible', ui.queueStatus === 'in_queue');
+  leaveQueueBtnEl.disabled = ui.queueStatus !== 'in_queue';
 }
 
 function getPreviewText(x, y) {
@@ -158,7 +196,7 @@ function getPreviewText(x, y) {
 }
 
 function onTileClick(x, y) {
-  if (ui.state.winner) return;
+  if (ui.state.winner || !canControlCurrentTurn()) return;
   const clicked = getUnitAt(ui.state, x, y);
   const selected = getSelectedUnit();
 
@@ -194,28 +232,53 @@ function renderHudOnly() {
   if (ui.state.turnSecondsLeft <= 5) turnTimerEl.classList.add('critical');
 }
 
-function connectWebSocket(manual = false) {
-  if (ui.socket && ui.socket.readyState === WebSocket.OPEN) return;
+function connectWebSocket(manual = false, autoJoinQueue = false) {
+  if (ui.socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(ui.socket.readyState)) return;
   const socket = new WebSocket('ws://127.0.0.1:8080');
   ui.socket = socket;
 
   socket.addEventListener('open', () => {
     ui.connection = 'remote';
     connectBtnEl.textContent = 'Connected';
-    setMessage('Connected to local WebSocket server. Waiting for opponent...');
+    setMessage('Connected to local WebSocket server.');
+    if (ui.sessionId) {
+      socket.send(JSON.stringify(wrapMessage(MessageType.RECONNECT_RESUME, { sessionId: ui.sessionId })));
+    } else if (autoJoinQueue) {
+      socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
+    }
     render();
   });
 
   socket.addEventListener('message', (event) => {
     const msg = JSON.parse(event.data);
+    if (msg.type === MessageType.SERVER_READY && msg.sessionId) {
+      setSessionId(msg.sessionId);
+      if (autoJoinQueue && !msg.resumed && !ui.roomId) {
+        socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
+      }
+      return;
+    }
+    if (msg.type === MessageType.MATCH_FOUND) {
+      ui.roomId = msg.roomId;
+      setMessage(`Match found${msg.roomId ? `: ${msg.roomId.slice(0, 8)}` : ''}.`);
+      render();
+      return;
+    }
     if (msg.type === MessageType.ASSIGNED_SIDE) {
       ui.assignedSide = msg.side;
+      ui.roomId = msg.roomId ?? ui.roomId;
       setMessage(`Connected as ${msg.side}.`);
+      render();
+      return;
+    }
+    if (msg.type === MessageType.QUEUE_STATUS) {
+      applyQueueStatus(msg);
       render();
       return;
     }
     if (msg.type === MessageType.STATE_SNAPSHOT) {
       ui.state = msg.state;
+      ui.roomId = msg.roomId ?? ui.roomId;
       if (mapSelectEl.value !== ui.state.mapKey) mapSelectEl.value = ui.state.mapKey;
       render();
       return;
@@ -229,6 +292,9 @@ function connectWebSocket(manual = false) {
     ui.connection = 'local';
     ui.socket = null;
     ui.assignedSide = null;
+    ui.roomId = null;
+    ui.queueStatus = 'offline';
+    ui.queueDetail = 'Offline';
     connectBtnEl.textContent = 'Connect Server';
     setMessage(manual ? 'WebSocket server disconnected. Running in local mode.' : 'WebSocket server unavailable. Running in local mode.');
     render();
@@ -274,6 +340,7 @@ function render() {
       if (attacks.includes(tileKey(x, y))) tile.classList.add('attackable');
       if (hoveredPath.includes(tileKey(x, y))) tile.classList.add('path');
       if (threats.has(tileKey(x, y))) tile.classList.add('threat');
+      tile.disabled = !canControlCurrentTurn() && !(selected?.x === x && selected?.y === y);
 
       if (unit) {
         tile.classList.add(unit.owner === P1 ? 'p1' : 'p2');
@@ -290,12 +357,15 @@ function render() {
   connectionModeEl.textContent = ui.connection === 'remote' ? 'Online' : 'Local';
   connectionModeEl.className = ui.connection;
   playerSideEl.textContent = ui.assignedSide ?? 'Any';
+  queueStatusEl.textContent = ui.queueDetail;
+  queueStatusEl.className = ui.queueStatus;
   actionFeedEl.textContent = ui.state.actionFeed;
   historyFeedEl.innerHTML = ui.state.history.map((entry) => `<li>${entry}</li>`).join('');
-  mapInfoEl.textContent = `${currentMap(ui.state).desc}${ui.connection === 'remote' ? ` Connected as ${ui.assignedSide ?? 'spectator?'}.` : ' Local mode.'}`;
+  mapInfoEl.textContent = `${currentMap(ui.state).desc}${ui.connection === 'remote' ? ` Connected as ${ui.assignedSide ?? 'unassigned'}. ${ui.roomId ? `Room ${ui.roomId.slice(0, 8)}.` : 'Not currently in a room.'}` : ' Local mode.'}`;
   renderHudOnly();
   previewInfoEl.textContent = ui.hoveredTile ? getPreviewText(ui.hoveredTile.x, ui.hoveredTile.y) : 'Hover or focus a tile to preview move paths, attacks, and invalid reasons.';
   rematchBtnEl.classList.toggle('visible', Boolean(ui.state.winner));
+  queueBtnEl.disabled = ui.connection !== 'remote' && ui.socket?.readyState !== WebSocket.CONNECTING;
   unitInfoEl.textContent = selected
     ? `${unitIcons[selected.type] ?? '?'} ${selected.owner} ${selected.type}\nHP: ${selected.hp}\nMove: ${selected.move}\nRange: ${selected.minRange}-${selected.maxRange}\nDamage: ${selected.damage}\nClimb Hills: ${selected.canClimb ? 'Yes' : 'No'}`
     : 'None';
