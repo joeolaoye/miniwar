@@ -10,14 +10,23 @@
   <main class="app">
     <header>
       <h1>Mini War MVP</h1>
-      <p>Fast tactical prototype with unit icons, animated actions, and clearer combat readability.</p>
+      <p>Now with map selection, hill terrain, LOS blocking, and unit climb rules.</p>
     </header>
 
     <section class="hud">
       <div><strong>Turn:</strong> <span id="turnPlayer"></span></div>
       <div><strong>Round:</strong> <span id="roundNum"></span></div>
       <div><strong>AP:</strong> <span id="apLeft"></span></div>
+      <div><strong>Timer:</strong> <span id="turnTimer"></span></div>
       <div><strong>Objective:</strong> <span id="objectiveStatus"></span></div>
+      <label>
+        <strong>Map:</strong>
+        <select id="mapSelect"></select>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="threatToggle" checked />
+        Show Threat Map
+      </label>
       <button id="endTurnBtn">End Turn</button>
       <button id="resetBtn">Reset Match</button>
     </section>
@@ -30,20 +39,17 @@
         <h2>Selected Unit</h2>
         <pre id="unitInfo">None</pre>
 
+        <h3>Terrain</h3>
+        <p id="mapInfo">-</p>
+
         <h3>Unit Icons</h3>
         <ul class="legend" id="legendList"></ul>
 
         <h3>Recent Action</h3>
         <p id="actionFeed">No actions yet.</p>
 
-        <h3>Rules</h3>
-        <ul>
-          <li>Each turn has 2 AP.</li>
-          <li>Move: 1 AP, Attack: 1 AP.</li>
-          <li>Scout cannot attack if it moved 2 tiles this turn.</li>
-          <li>Artillery attacks range 2-3, not adjacent.</li>
-          <li>Round 8+: outer ring is danger zone (1 damage at end of turn).</li>
-        </ul>
+        <h3>Action History</h3>
+        <ol id="historyFeed" class="history"></ol>
       </aside>
     </section>
 

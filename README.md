@@ -35,6 +35,13 @@ Completed improvements in the playable MVP:
 - Animated visual effects for move, attack, hit, and kill events.
 - Improved panel UX with icon legend and recent action feed.
 - Enhanced board readability via stronger HUD containers and tile states.
+- Turn timer with auto end-turn on timeout.
+- Toggleable threat map overlay to read enemy attack coverage.
+- Rolling action history panel for tactical playback.
+- Keyboard shortcut: press `E` to end turn quickly.
+- Multiple selectable maps (Center Pressure, Broken Ridge, Split Pass).
+- Hill terrain that blocks ranged line-of-sight.
+- Unit-specific climbing rules (Commander/Scout can climb; others cannot).
 
 ## 1) Product goals
 
