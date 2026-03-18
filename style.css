@@ -20,8 +20,10 @@ button, select { padding: .45rem .75rem; border-radius: 8px; border: 1px solid #
 .tile.attackable { outline: 2px solid #ff5d5d; }
 .tile.threat { box-shadow: inset 0 0 0 2px rgba(255,130,130,.45); }
 .tile.selected { box-shadow: inset 0 0 0 3px #76d4ff; }
-.tile.p1 { background-color: #1a3a5f; }
-.tile.p2 { background-color: #5a2330; }
+.tile.p1:not(.hill) { background-color: #1a3a5f; }
+.tile.p2:not(.hill) { background-color: #5a2330; }
+.tile.p1.hill { box-shadow: inset 0 0 0 2px #b79353, 0 0 0 2px rgba(54, 124, 201, 0.45); }
+.tile.p2.hill { box-shadow: inset 0 0 0 2px #b79353, 0 0 0 2px rgba(201, 84, 114, 0.45); }
 .unit-token { font-size: 1.55rem; text-shadow: 0 2px 6px rgba(0,0,0,.4); }
 .hp-badge { position: absolute; right: 4px; top: 4px; min-width: 20px; height: 20px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; background: rgba(10,14,20,.9); border: 1px solid #9db0c7; }
 .panel { background: rgba(23, 33, 45, 0.92); border: 1px solid #2e3b4e; padding: .75rem; border-radius: 10px; }

@@ -84,32 +84,72 @@ function getUnitAt(x, y) { return state.units.find(u => u.x === x && u.y === y);
 function getSelectedUnit() { return state.units.find(u => u.id === state.selectedUnitId); }
 function isHill(x, y) { return hillSet().has(tileKey(x, y)); }
 
+function gcd(a, b) {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y !== 0) {
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x || 1;
+}
+
 function isLosBlocked(attacker, defender) {
   if (attacker.maxRange === 1) return false;
   const dx = defender.x - attacker.x;
   const dy = defender.y - attacker.y;
-  const steps = Math.max(Math.abs(dx), Math.abs(dy));
-  if (steps <= 1) return false;
-  const stepX = dx / steps;
-  const stepY = dy / steps;
-  for (let i = 1; i < steps; i++) {
-    const x = Math.round(attacker.x + stepX * i);
-    const y = Math.round(attacker.y + stepY * i);
+
+  // Keep ranged LOS deterministic and readable: orthogonal or diagonal lanes only.
+  const isOrthogonal = dx === 0 || dy === 0;
+  const isDiagonal = Math.abs(dx) === Math.abs(dy);
+  if (!(isOrthogonal || isDiagonal)) return true;
+
+  const stepDiv = gcd(dx, dy);
+  const stepX = dx / stepDiv;
+  const stepY = dy / stepDiv;
+  for (let i = 1; i < stepDiv; i++) {
+    const x = attacker.x + stepX * i;
+    const y = attacker.y + stepY * i;
     if (isHill(x, y)) return true;
   }
   return false;
 }
 
+function canOccupyTile(unit, x, y) {
+  if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return false;
+  if (getUnitAt(x, y)) return false;
+  if (isHill(x, y) && !unit.canClimb) return false;
+  return true;
+}
+
 function legalMoves(unit) {
-  const out = [];
-  for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) {
-    if (getUnitAt(x, y)) continue;
-    const d = Math.abs(unit.x - x) + Math.abs(unit.y - y);
-    if (d < 1 || d > unit.move) continue;
-    if (isHill(x, y) && !unit.canClimb) continue;
-    out.push({ x, y });
+  const visited = new Set([tileKey(unit.x, unit.y)]);
+  const queue = [{ x: unit.x, y: unit.y, steps: 0 }];
+  const result = [];
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (cur.steps >= unit.move) continue;
+
+    const neighbors = [
+      { x: cur.x + 1, y: cur.y },
+      { x: cur.x - 1, y: cur.y },
+      { x: cur.x, y: cur.y + 1 },
+      { x: cur.x, y: cur.y - 1 },
+    ];
+
+    for (const next of neighbors) {
+      const key = tileKey(next.x, next.y);
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (!canOccupyTile(unit, next.x, next.y)) continue;
+      result.push({ x: next.x, y: next.y });
+      queue.push({ x: next.x, y: next.y, steps: cur.steps + 1 });
+    }
   }
-  return out;
+
+  return result;
 }
 
 function legalAttacks(unit) {
@@ -122,10 +162,28 @@ function legalAttacks(unit) {
   });
 }
 
+function threatenedTilesForUnit(unit) {
+  const threatened = new Set();
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      if (x === unit.x && y === unit.y) continue;
+      const distance = Math.abs(unit.x - x) + Math.abs(unit.y - y);
+      if (distance < unit.minRange || distance > unit.maxRange) continue;
+      if (isLosBlocked(unit, { x, y, maxRange: 1 })) continue;
+      threatened.add(tileKey(x, y));
+    }
+  }
+  return threatened;
+}
+
 function threatTiles(forPlayer) {
   const enemies = state.units.filter(u => u.owner !== forPlayer);
   const threat = new Set();
-  for (const enemy of enemies) for (const target of legalAttacks(enemy)) threat.add(tileKey(target.x, target.y));
+  for (const enemy of enemies) {
+    for (const key of threatenedTilesForUnit(enemy)) {
+      threat.add(key);
+    }
+  }
   return threat;
 }
 

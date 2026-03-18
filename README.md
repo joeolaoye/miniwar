@@ -42,6 +42,9 @@ Completed improvements in the playable MVP:
 - Multiple selectable maps (Center Pressure, Broken Ridge, Split Pass).
 - Hill terrain that blocks ranged line-of-sight.
 - Unit-specific climbing rules (Commander/Scout can climb; others cannot).
+- Ranged LOS is lane-based (orthogonal/diagonal only) and hills block lanes.
+- Movement now uses step-by-step pathing (no teleporting through blocked tiles).
+- Threat map highlights full enemy coverage, not just currently occupied attack targets.
 
 ## 1) Product goals
 
@@ -394,4 +397,3 @@ Track product funnels:
 3. Create low-fidelity UI wireframes for the 4 core screens.
 4. Implement local playable prototype before full networking.
 5. Run 200 bot-vs-bot simulations for initial balance signal.
-
