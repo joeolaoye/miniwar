@@ -162,10 +162,28 @@ function legalAttacks(unit) {
   });
 }
 
+function threatenedTilesForUnit(unit) {
+  const threatened = new Set();
+  for (let x = 0; x < SIZE; x++) {
+    for (let y = 0; y < SIZE; y++) {
+      if (x === unit.x && y === unit.y) continue;
+      const distance = Math.abs(unit.x - x) + Math.abs(unit.y - y);
+      if (distance < unit.minRange || distance > unit.maxRange) continue;
+      if (isLosBlocked(unit, { x, y, maxRange: 1 })) continue;
+      threatened.add(tileKey(x, y));
+    }
+  }
+  return threatened;
+}
+
 function threatTiles(forPlayer) {
   const enemies = state.units.filter(u => u.owner !== forPlayer);
   const threat = new Set();
-  for (const enemy of enemies) for (const target of legalAttacks(enemy)) threat.add(tileKey(target.x, target.y));
+  for (const enemy of enemies) {
+    for (const key of threatenedTilesForUnit(enemy)) {
+      threat.add(key);
+    }
+  }
   return threat;
 }
 

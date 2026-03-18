@@ -44,6 +44,7 @@ Completed improvements in the playable MVP:
 - Unit-specific climbing rules (Commander/Scout can climb; others cannot).
 - Ranged LOS is lane-based (orthogonal/diagonal only) and hills block lanes.
 - Movement now uses step-by-step pathing (no teleporting through blocked tiles).
+- Threat map highlights full enemy coverage, not just currently occupied attack targets.
 
 ## 1) Product goals
 
