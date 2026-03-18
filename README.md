@@ -45,6 +45,7 @@ Completed improvements in the playable MVP:
 - Ranged LOS is lane-based (orthogonal/diagonal only) and hills block lanes.
 - Movement now uses step-by-step pathing (no teleporting through blocked tiles).
 - Threat map highlights full enemy coverage, not just currently occupied attack targets.
+- Hover/focus previews now explain move paths, attack damage, and invalid-action reasons.
 
 ## 1) Product goals
 

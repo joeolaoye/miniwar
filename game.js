@@ -42,7 +42,7 @@ const state = {
   units: [], current: P1, round: 1, ap: 2, selectedUnitId: null,
   sprintedScouts: new Set(), objectiveOwner: null, objectiveHoldPending: null,
   winner: null, actionFeed: "No actions yet.", history: [], turnSecondsLeft: TURN_SECONDS,
-  showThreatMap: true, mapKey: "center",
+  showThreatMap: true, mapKey: "center", hoveredTile: null,
 };
 
 const boardEl = document.getElementById("board");
@@ -59,6 +59,7 @@ const unitInfoEl = document.getElementById("unitInfo");
 const actionFeedEl = document.getElementById("actionFeed");
 const historyFeedEl = document.getElementById("historyFeed");
 const legendListEl = document.getElementById("legendList");
+const previewInfoEl = document.getElementById("previewInfo");
 
 document.getElementById("endTurnBtn").addEventListener("click", endTurn);
 document.getElementById("resetBtn").addEventListener("click", initGame);
@@ -121,6 +122,45 @@ function canOccupyTile(unit, x, y) {
   if (getUnitAt(x, y)) return false;
   if (isHill(x, y) && !unit.canClimb) return false;
   return true;
+}
+
+function buildPathTo(unit, targetX, targetY) {
+  const startKey = tileKey(unit.x, unit.y);
+  const queue = [{ x: unit.x, y: unit.y }];
+  const parents = new Map([[startKey, null]]);
+
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    if (cur.x === targetX && cur.y === targetY) break;
+
+    const neighbors = [
+      { x: cur.x + 1, y: cur.y },
+      { x: cur.x - 1, y: cur.y },
+      { x: cur.x, y: cur.y + 1 },
+      { x: cur.x, y: cur.y - 1 },
+    ];
+
+    for (const next of neighbors) {
+      const key = tileKey(next.x, next.y);
+      if (parents.has(key)) continue;
+      if (!canOccupyTile(unit, next.x, next.y)) continue;
+      parents.set(key, cur);
+      queue.push(next);
+    }
+  }
+
+  const targetKey = tileKey(targetX, targetY);
+  if (!parents.has(targetKey)) return [];
+
+  const path = [];
+  let curKey = targetKey;
+  while (curKey && curKey !== startKey) {
+    const [x, y] = curKey.split(",").map(Number);
+    path.unshift({ x, y });
+    const parent = parents.get(curKey);
+    curKey = parent ? tileKey(parent.x, parent.y) : null;
+  }
+  return path;
 }
 
 function legalMoves(unit) {
@@ -187,6 +227,77 @@ function threatTiles(forPlayer) {
   return threat;
 }
 
+function calculateDamage(attacker, defender) {
+  let damage = attacker.damage;
+  const defenderOnCover = coverSet().has(tileKey(defender.x, defender.y));
+  const rangedAttack = attacker.maxRange > 1;
+  const modifiers = [];
+
+  if (defenderOnCover && rangedAttack) {
+    damage = Math.max(1, damage - 1);
+    modifiers.push("cover");
+  }
+  if (defender.type === "Tank" && rangedAttack) {
+    damage = Math.max(1, damage - 1);
+    modifiers.push("tank armor");
+  }
+
+  return { damage, modifiers };
+}
+
+function getAttackBlockReason(attacker, defender) {
+  const distance = manhattan(attacker, defender);
+  if (distance < attacker.minRange || distance > attacker.maxRange) {
+    return `Out of range (${distance}).`;
+  }
+  if (attacker.type === "Scout" && state.sprintedScouts.has(attacker.id)) {
+    return "Scout sprinted this turn and cannot attack.";
+  }
+  if (isLosBlocked(attacker, defender)) {
+    return "Hill blocks line of sight.";
+  }
+  return null;
+}
+
+function getPreviewText(x, y) {
+  const selected = getSelectedUnit();
+  if (!selected) return "Select a unit to preview moves, paths, and attacks.";
+
+  const occupant = getUnitAt(x, y);
+  const moveTarget = legalMoves(selected).find(tile => tile.x === x && tile.y === y);
+  if (moveTarget) {
+    const path = buildPathTo(selected, x, y);
+    const terrain = [
+      isHill(x, y) ? "hill" : null,
+      coverSet().has(tileKey(x, y)) ? "cover" : null,
+      threatTiles(state.current).has(tileKey(x, y)) ? "enemy threat" : null,
+    ].filter(Boolean);
+    const terrainText = terrain.length ? ` Terrain: ${terrain.join(", ")}.` : "";
+    return `Move ${selected.type} to (${x}, ${y}) in ${path.length} step${path.length === 1 ? "" : "s"}.${terrainText}`;
+  }
+
+  if (occupant && occupant.owner !== state.current) {
+    const blockedReason = getAttackBlockReason(selected, occupant);
+    if (blockedReason) {
+      return `Cannot attack ${occupant.type} at (${x}, ${y}). ${blockedReason}`;
+    }
+    const { damage, modifiers } = calculateDamage(selected, occupant);
+    const modifierText = modifiers.length ? ` Reduced by ${modifiers.join(" and ")}.` : "";
+    const lethalText = occupant.hp - damage <= 0 ? " Lethal hit." : "";
+    return `Attack ${occupant.type} for ${damage} damage.${modifierText}${lethalText}`;
+  }
+
+  if (occupant && occupant.owner === state.current) {
+    return `Friendly ${occupant.type}. Click to select it.`;
+  }
+
+  if (isHill(x, y) && !selected.canClimb) {
+    return `${selected.type} cannot climb hills.`;
+  }
+
+  return "No valid action on this tile.";
+}
+
 function addHistory(entry) { state.history.unshift(entry); state.history = state.history.slice(0, 12); }
 
 function initLegend() {
@@ -208,6 +319,7 @@ function initGame() {
   state.units = []; state.current = P1; state.round = 1; state.ap = 2; state.selectedUnitId = null;
   state.sprintedScouts = new Set(); state.objectiveOwner = null; state.objectiveHoldPending = null;
   state.winner = null; state.actionFeed = "No actions yet."; state.history = []; state.turnSecondsLeft = TURN_SECONDS;
+  state.hoveredTile = null;
   threatToggleEl.checked = state.showThreatMap;
 
   const p1Rows = [5, 4], p2Rows = [0, 1];
@@ -226,11 +338,7 @@ function initGame() {
 }
 
 function resolveAttack(attacker, defender) {
-  let damage = attacker.damage;
-  const defenderOnCover = coverSet().has(tileKey(defender.x, defender.y));
-  const rangedAttack = attacker.maxRange > 1;
-  if (defenderOnCover && rangedAttack) damage = Math.max(1, damage - 1);
-  if (defender.type === "Tank" && rangedAttack) damage = Math.max(1, damage - 1);
+  const { damage } = calculateDamage(attacker, defender);
 
   defender.hp -= damage;
   state.actionFeed = `${attacker.owner} ${attacker.type} hit ${defender.owner} ${defender.type} for ${damage}.`;
@@ -266,14 +374,13 @@ function onTileClick(x, y) {
 
   if (clicked && clicked.owner !== state.current) {
     const canAttack = legalAttacks(selected).some(u => u.id === clicked.id);
-    const scoutBlocked = selected.type === "Scout" && state.sprintedScouts.has(selected.id);
-    if (canAttack && !scoutBlocked && state.ap >= 1) {
+    const blockedReason = getAttackBlockReason(selected, clicked);
+    if (canAttack && !blockedReason && state.ap >= 1) {
       resolveAttack(selected, clicked); state.ap -= 1;
       if (state.ap <= 0 && !state.winner) endTurn(); else render();
       return;
     }
-    if (scoutBlocked) setMessage("Scout sprinted this turn and cannot attack.");
-    if (!scoutBlocked && !canAttack) setMessage("Attack blocked (range or hill line-of-sight).");
+    setMessage(blockedReason ?? "Attack blocked.");
   }
 }
 
@@ -336,6 +443,9 @@ function render() {
   const moves = selected ? legalMoves(selected).map(t => tileKey(t.x, t.y)) : [];
   const attacks = selected ? legalAttacks(selected).map(u => tileKey(u.x, u.y)) : [];
   const threats = state.showThreatMap ? threatTiles(state.current) : new Set();
+  const hoveredPath = selected && state.hoveredTile
+    ? buildPathTo(selected, state.hoveredTile.x, state.hoveredTile.y).map(tile => tileKey(tile.x, tile.y))
+    : [];
   const dangerOn = state.round >= 8;
   const hills = hillSet();
   const covers = coverSet();
@@ -345,6 +455,18 @@ function render() {
     const tile = document.createElement("button");
     tile.className = "tile";
     tile.onclick = () => onTileClick(x, y);
+    tile.onmouseenter = () => {
+      if (state.hoveredTile?.x === x && state.hoveredTile?.y === y) return;
+      state.hoveredTile = { x, y };
+      previewInfoEl.textContent = getPreviewText(x, y);
+      render();
+    };
+    tile.onfocus = () => {
+      if (state.hoveredTile?.x === x && state.hoveredTile?.y === y) return;
+      state.hoveredTile = { x, y };
+      previewInfoEl.textContent = getPreviewText(x, y);
+      render();
+    };
     const unit = getUnitAt(x, y);
 
     if (x === obj.x && y === obj.y) tile.classList.add("objective");
@@ -354,6 +476,7 @@ function render() {
     if (selected?.x === x && selected?.y === y) tile.classList.add("selected");
     if (moves.includes(tileKey(x, y))) tile.classList.add("selectable");
     if (attacks.includes(tileKey(x, y))) tile.classList.add("attackable");
+    if (hoveredPath.includes(tileKey(x, y))) tile.classList.add("path");
     if (threats.has(tileKey(x, y))) tile.classList.add("threat");
 
     if (unit) {
@@ -371,6 +494,7 @@ function render() {
   historyFeedEl.innerHTML = state.history.map(entry => `<li>${entry}</li>`).join("");
   mapInfoEl.textContent = currentMap().desc;
   renderHudOnly();
+  previewInfoEl.textContent = state.hoveredTile ? getPreviewText(state.hoveredTile.x, state.hoveredTile.y) : "Hover or focus a tile to preview move paths, attacks, and invalid reasons.";
 
   unitInfoEl.textContent = selected
     ? `${unitIcons[selected.type] ?? "?"} ${selected.owner} ${selected.type}\nHP: ${selected.hp}\nMove: ${selected.move}\nRange: ${selected.minRange}-${selected.maxRange}\nDamage: ${selected.damage}\nClimb Hills: ${selected.canClimb ? "Yes" : "No"}`

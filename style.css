@@ -18,6 +18,8 @@ button, select { padding: .45rem .75rem; border-radius: 8px; border: 1px solid #
 .tile.danger { background: #4a1f1f; }
 .tile.selectable { outline: 2px solid #4db3ff; }
 .tile.attackable { outline: 2px solid #ff5d5d; }
+.tile.path { box-shadow: inset 0 0 0 2px rgba(88, 212, 255, 0.7); }
+.tile.path::before { content: ""; position: absolute; width: 14px; height: 14px; border-radius: 999px; background: rgba(88, 212, 255, 0.85); }
 .tile.threat { box-shadow: inset 0 0 0 2px rgba(255,130,130,.45); }
 .tile.selected { box-shadow: inset 0 0 0 3px #76d4ff; }
 .tile.p1:not(.hill) { background-color: #1a3a5f; }
@@ -26,6 +28,9 @@ button, select { padding: .45rem .75rem; border-radius: 8px; border: 1px solid #
 .tile.p2.hill { box-shadow: inset 0 0 0 2px #b79353, 0 0 0 2px rgba(201, 84, 114, 0.45); }
 .unit-token { font-size: 1.55rem; text-shadow: 0 2px 6px rgba(0,0,0,.4); }
 .hp-badge { position: absolute; right: 4px; top: 4px; min-width: 20px; height: 20px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; background: rgba(10,14,20,.9); border: 1px solid #9db0c7; }
+.preview-panel { margin-top: .75rem; padding: .75rem; border: 1px solid #2e3b4e; border-radius: 10px; background: rgba(23, 33, 45, 0.82); min-height: 92px; }
+.preview-panel h3 { margin: 0 0 .4rem; }
+.preview-panel p { margin: 0; color: #dbe8f7; }
 .panel { background: rgba(23, 33, 45, 0.92); border: 1px solid #2e3b4e; padding: .75rem; border-radius: 10px; }
 .legend { list-style: none; margin: .4rem 0 .8rem; padding: 0; display: grid; gap: .2rem; }
 .legend li { display: flex; align-items: center; gap: .4rem; }
