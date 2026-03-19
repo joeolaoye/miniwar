@@ -46,6 +46,7 @@ const leaveQueueBtnEl = document.getElementById('leaveQueueBtn');
 const rematchBtnEl = document.getElementById('rematchBtn');
 
 const ui = {
+  pendingQueueJoin: false,
   state: createInitialState('center'),
   selectedUnitId: null,
   hoveredTile: null,
@@ -87,6 +88,12 @@ function setMessage(msg) { messageEl.textContent = msg; }
 function setSessionId(sessionId) {
   ui.sessionId = sessionId;
   if (sessionId) localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+}
+
+function queueJoinAfterConnect() {
+  if (!ui.socket || ui.socket.readyState !== WebSocket.OPEN) return;
+  ui.pendingQueueJoin = false;
+  ui.socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
 }
 
 function initMapSelect() {
@@ -146,10 +153,13 @@ function resetMatch(mapKey = ui.state.mapKey) {
 }
 
 function updateQueue(joinQueue) {
+  if (joinQueue) ui.pendingQueueJoin = true;
   if (!ui.socket || ui.socket.readyState !== WebSocket.OPEN) {
+    if (!joinQueue) ui.pendingQueueJoin = false;
     connectWebSocket(true, joinQueue);
     return;
   }
+  if (!joinQueue) ui.pendingQueueJoin = false;
   ui.socket.send(JSON.stringify(wrapMessage(joinQueue ? MessageType.QUEUE_JOIN : MessageType.QUEUE_LEAVE)));
 }
 
@@ -243,8 +253,8 @@ function connectWebSocket(manual = false, autoJoinQueue = false) {
     setMessage('Connected to local WebSocket server.');
     if (ui.sessionId) {
       socket.send(JSON.stringify(wrapMessage(MessageType.RECONNECT_RESUME, { sessionId: ui.sessionId })));
-    } else if (autoJoinQueue) {
-      socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
+    } else if (autoJoinQueue || ui.pendingQueueJoin) {
+      queueJoinAfterConnect();
     }
     render();
   });
@@ -253,8 +263,8 @@ function connectWebSocket(manual = false, autoJoinQueue = false) {
     const msg = JSON.parse(event.data);
     if (msg.type === MessageType.SERVER_READY && msg.sessionId) {
       setSessionId(msg.sessionId);
-      if (autoJoinQueue && !msg.resumed && !ui.roomId) {
-        socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
+      if ((autoJoinQueue || ui.pendingQueueJoin) && !ui.roomId && !ui.assignedSide) {
+        queueJoinAfterConnect();
       }
       return;
     }
@@ -289,6 +299,7 @@ function connectWebSocket(manual = false, autoJoinQueue = false) {
   });
 
   socket.addEventListener('close', () => {
+    ui.pendingQueueJoin = false;
     ui.connection = 'local';
     ui.socket = null;
     ui.assignedSide = null;

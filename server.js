@@ -189,11 +189,31 @@ function joinQueue(session) {
   tryMatchmake();
 }
 
-function handleReconnect(socket, requestedSessionId) {
+function detachSessionIfCurrentSocket(session, socket) {
+  if (!session || session.socket !== socket) return;
+  session.socket = null;
+  session.disconnectedAt = Date.now();
+  leaveQueue(session);
+  if (session.roomId) {
+    const room = rooms.get(session.roomId);
+    if (room) sendRoomPresence(room);
+    cleanupRoomIfEmpty(session.roomId);
+  }
+}
+
+function handleReconnect(socket, requestedSessionId, transientSession) {
   const existing = sessions.get(requestedSessionId);
-  if (!existing) return createSession(socket);
+  if (!existing) return transientSession;
+
+  sessions.delete(transientSession.id);
+  const previousSocket = existing.socket;
   existing.socket = socket;
   existing.disconnectedAt = null;
+
+  if (previousSocket && previousSocket !== socket && !previousSocket.destroyed) {
+    previousSocket.destroy();
+  }
+
   return existing;
 }
 
@@ -205,18 +225,6 @@ function cleanupRoomIfEmpty(roomId) {
   if (everyoneGone) {
     stopTimer(roomId);
     rooms.delete(roomId);
-  }
-}
-
-function handleDisconnect(session) {
-  if (!session) return;
-  session.socket = null;
-  session.disconnectedAt = Date.now();
-  leaveQueue(session);
-  if (session.roomId) {
-    const room = rooms.get(session.roomId);
-    if (room) sendRoomPresence(room);
-    cleanupRoomIfEmpty(session.roomId);
   }
 }
 
@@ -240,7 +248,8 @@ server.on('upgrade', (req, socket) => {
     '\r\n',
   ].join('\r\n'));
 
-  let session = createSession(socket);
+  const transientSession = createSession(socket);
+  let session = transientSession;
   send(socket, wrapMessage(MessageType.SERVER_READY, {
     sessionId: session.id,
     canResume: true,
@@ -252,12 +261,13 @@ server.on('upgrade', (req, socket) => {
   }));
 
   socket.on('data', (chunk) => {
+    if (session.socket !== socket) return;
     const text = decodeFrame(Buffer.from(chunk));
     if (!text) return;
     const msg = JSON.parse(text);
 
     if (msg.type === MessageType.RECONNECT_RESUME) {
-      session = handleReconnect(socket, msg.sessionId);
+      session = handleReconnect(socket, msg.sessionId, transientSession);
       send(socket, wrapMessage(MessageType.SERVER_READY, {
         sessionId: session.id,
         resumed: session.id === msg.sessionId,
@@ -317,9 +327,9 @@ server.on('upgrade', (req, socket) => {
     }
   });
 
-  socket.on('close', () => handleDisconnect(session));
-  socket.on('end', () => handleDisconnect(session));
-  socket.on('error', () => handleDisconnect(session));
+  socket.on('close', () => detachSessionIfCurrentSocket(session, socket));
+  socket.on('end', () => detachSessionIfCurrentSocket(session, socket));
+  socket.on('error', () => detachSessionIfCurrentSocket(session, socket));
 });
 
 const port = 8080;
