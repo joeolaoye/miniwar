@@ -24,7 +24,17 @@ Run locally:
 python3 -m http.server 4173
 ```
 
-Then open `http://127.0.0.1:4173`.
+In a second terminal, run the local WebSocket server:
+
+```bash
+npm run server
+```
+
+Then open `http://127.0.0.1:4173`. Run tests with:
+
+```bash
+npm test
+```
 
 ## UI polish pass (implemented)
 
@@ -46,6 +56,11 @@ Completed improvements in the playable MVP:
 - Movement now uses step-by-step pathing (no teleporting through blocked tiles).
 - Threat map highlights full enemy coverage, not just currently occupied attack targets.
 - Hover/focus previews now explain move paths, attack damage, and invalid-action reasons.
+- Rules engine extracted into reusable modules for testing and server validation.
+- Local dependency-free WebSocket server added for authoritative two-client matches.
+- Shared protocol module added for versioned client/server message types.
+- HUD now shows connection mode/assigned side and exposes rematch/connect controls.
+- Browser client now supports explicit queue join/leave, room IDs, and reconnect resume via stored session IDs.
 
 ## 1) Product goals
 

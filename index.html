@@ -19,6 +19,9 @@
       <div><strong>AP:</strong> <span id="apLeft"></span></div>
       <div><strong>Timer:</strong> <span id="turnTimer"></span></div>
       <div><strong>Objective:</strong> <span id="objectiveStatus"></span></div>
+      <div><strong>Mode:</strong> <span id="connectionMode"></span></div>
+      <div><strong>Side:</strong> <span id="playerSide"></span></div>
+      <div><strong>Queue:</strong> <span id="queueStatus">Offline</span></div>
       <label>
         <strong>Map:</strong>
         <select id="mapSelect"></select>
@@ -27,8 +30,12 @@
         <input type="checkbox" id="threatToggle" checked />
         Show Threat Map
       </label>
+      <button id="connectBtn">Connect Server</button>
+      <button id="queueBtn">Join Queue</button>
+      <button id="leaveQueueBtn">Leave Queue</button>
       <button id="endTurnBtn">End Turn</button>
       <button id="resetBtn">Reset Match</button>
+      <button id="rematchBtn">Rematch</button>
     </section>
 
     <section class="layout">
@@ -60,6 +67,6 @@
     <p id="message" class="message"></p>
   </main>
 
-  <script src="game.js"></script>
+  <script type="module" src="game.js"></script>
 </body>
 </html>

@@ -1,507 +1,377 @@
-const SIZE = 6;
-const P1 = "Blue";
-const P2 = "Red";
-const TURN_SECONDS = 25;
+import {
+  P1,
+  applyAction,
+  buildPathTo,
+  calculateDamage,
+  createInitialState,
+  currentMap,
+  getAttackBlockReason,
+  getUnitAt,
+  getUnitById,
+  hillSet,
+  coverSet,
+  legalAttacks,
+  legalMoves,
+  maps,
+  objective,
+  threatTiles,
+  tileKey,
+  unitIcons,
+} from './engine/index.js';
+import { ActionType, MessageType, wrapMessage } from './protocol/index.js';
 
-const unitIcons = { Commander: "♔", Soldier: "⚔", Scout: "➤", Tank: "🛡", Artillery: "✹" };
+const SESSION_STORAGE_KEY = 'miniwar-session-id';
 
-const maps = {
-  center: {
-    name: "Center Pressure",
-    objective: { x: 2, y: 2 },
-    cover: ["1,2", "1,3", "4,2", "4,3"],
-    hills: ["2,1", "3,4"],
-    desc: "Balanced center objective with two hills creating LOS lanes.",
-  },
-  ridge: {
-    name: "Broken Ridge",
-    objective: { x: 3, y: 2 },
-    cover: ["0,2", "5,3", "2,4", "3,1"],
-    hills: ["2,2", "3,2", "2,3"],
-    desc: "Central hill ridge blocks ranged lanes unless flanked.",
-  },
-  split: {
-    name: "Split Pass",
-    objective: { x: 2, y: 3 },
-    cover: ["1,1", "4,4", "0,3", "5,2"],
-    hills: ["1,2", "4,3"],
-    desc: "Split hill chokepoints reward mobile climbing units.",
-  },
+const boardEl = document.getElementById('board');
+const mapSelectEl = document.getElementById('mapSelect');
+const mapInfoEl = document.getElementById('mapInfo');
+const turnPlayerEl = document.getElementById('turnPlayer');
+const roundNumEl = document.getElementById('roundNum');
+const apLeftEl = document.getElementById('apLeft');
+const objectiveStatusEl = document.getElementById('objectiveStatus');
+const turnTimerEl = document.getElementById('turnTimer');
+const threatToggleEl = document.getElementById('threatToggle');
+const messageEl = document.getElementById('message');
+const unitInfoEl = document.getElementById('unitInfo');
+const actionFeedEl = document.getElementById('actionFeed');
+const historyFeedEl = document.getElementById('historyFeed');
+const legendListEl = document.getElementById('legendList');
+const previewInfoEl = document.getElementById('previewInfo');
+const connectionModeEl = document.getElementById('connectionMode');
+const playerSideEl = document.getElementById('playerSide');
+const queueStatusEl = document.getElementById('queueStatus');
+const connectBtnEl = document.getElementById('connectBtn');
+const queueBtnEl = document.getElementById('queueBtn');
+const leaveQueueBtnEl = document.getElementById('leaveQueueBtn');
+const rematchBtnEl = document.getElementById('rematchBtn');
+
+const ui = {
+  state: createInitialState('center'),
+  selectedUnitId: null,
+  hoveredTile: null,
+  showThreatMap: true,
+  connection: 'local',
+  socket: null,
+  assignedSide: null,
+  queueStatus: 'offline',
+  queueDetail: 'Offline',
+  roomId: null,
+  sessionId: localStorage.getItem(SESSION_STORAGE_KEY),
 };
 
-const rosterTemplate = [
-  { type: "Commander", hp: 3, move: 1, minRange: 1, maxRange: 1, damage: 1, canClimb: true },
-  { type: "Soldier", hp: 2, move: 1, minRange: 1, maxRange: 1, damage: 1, canClimb: false },
-  { type: "Soldier", hp: 2, move: 1, minRange: 1, maxRange: 1, damage: 1, canClimb: false },
-  { type: "Scout", hp: 2, move: 2, minRange: 1, maxRange: 1, damage: 1, canClimb: true },
-  { type: "Tank", hp: 4, move: 1, minRange: 1, maxRange: 1, damage: 1, canClimb: false },
-  { type: "Artillery", hp: 2, move: 1, minRange: 2, maxRange: 3, damage: 2, canClimb: false },
-];
-
-const state = {
-  units: [], current: P1, round: 1, ap: 2, selectedUnitId: null,
-  sprintedScouts: new Set(), objectiveOwner: null, objectiveHoldPending: null,
-  winner: null, actionFeed: "No actions yet.", history: [], turnSecondsLeft: TURN_SECONDS,
-  showThreatMap: true, mapKey: "center", hoveredTile: null,
-};
-
-const boardEl = document.getElementById("board");
-const mapSelectEl = document.getElementById("mapSelect");
-const mapInfoEl = document.getElementById("mapInfo");
-const turnPlayerEl = document.getElementById("turnPlayer");
-const roundNumEl = document.getElementById("roundNum");
-const apLeftEl = document.getElementById("apLeft");
-const objectiveStatusEl = document.getElementById("objectiveStatus");
-const turnTimerEl = document.getElementById("turnTimer");
-const threatToggleEl = document.getElementById("threatToggle");
-const messageEl = document.getElementById("message");
-const unitInfoEl = document.getElementById("unitInfo");
-const actionFeedEl = document.getElementById("actionFeed");
-const historyFeedEl = document.getElementById("historyFeed");
-const legendListEl = document.getElementById("legendList");
-const previewInfoEl = document.getElementById("previewInfo");
-
-document.getElementById("endTurnBtn").addEventListener("click", endTurn);
-document.getElementById("resetBtn").addEventListener("click", initGame);
-threatToggleEl.addEventListener("change", () => { state.showThreatMap = threatToggleEl.checked; render(); });
-mapSelectEl.addEventListener("change", () => { state.mapKey = mapSelectEl.value; initGame(); });
-document.addEventListener("keydown", (event) => { if (event.key.toLowerCase() === "e") endTurn(); });
+document.getElementById('endTurnBtn').addEventListener('click', () => performAction({ type: ActionType.END_TURN }));
+document.getElementById('resetBtn').addEventListener('click', () => resetMatch());
+mapSelectEl.addEventListener('change', () => resetMatch(mapSelectEl.value));
+threatToggleEl.addEventListener('change', () => { ui.showThreatMap = threatToggleEl.checked; render(); });
+connectBtnEl.addEventListener('click', () => connectWebSocket(true));
+queueBtnEl.addEventListener('click', () => updateQueue(true));
+leaveQueueBtnEl.addEventListener('click', () => updateQueue(false));
+rematchBtnEl.addEventListener('click', () => resetMatch());
+document.addEventListener('keydown', (event) => { if (event.key.toLowerCase() === 'e') performAction({ type: ActionType.END_TURN }); });
 
 setInterval(() => {
-  if (state.winner) return;
-  state.turnSecondsLeft -= 1;
-  if (state.turnSecondsLeft <= 0) { state.turnSecondsLeft = 0; setMessage(`${state.current} timed out. Turn auto-ended.`); endTurn(); }
-  else renderHudOnly();
+  if (ui.connection === 'remote') return;
+  if (ui.state.winner) return;
+  ui.state.turnSecondsLeft -= 1;
+  if (ui.state.turnSecondsLeft <= 0) {
+    ui.state.turnSecondsLeft = 0;
+    setMessage(`${ui.state.current} timed out. Turn auto-ended.`);
+    performAction({ type: ActionType.END_TURN });
+  } else {
+    renderHudOnly();
+  }
 }, 1000);
 
-function currentMap() { return maps[state.mapKey]; }
-function mapSet(list) { return new Set(list); }
-function hillSet() { return mapSet(currentMap().hills); }
-function coverSet() { return mapSet(currentMap().cover); }
-function objective() { return currentMap().objective; }
-function tileKey(x, y) { return `${x},${y}`; }
-function manhattan(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
-function getUnitAt(x, y) { return state.units.find(u => u.x === x && u.y === y); }
-function getSelectedUnit() { return state.units.find(u => u.id === state.selectedUnitId); }
-function isHill(x, y) { return hillSet().has(tileKey(x, y)); }
+function setMessage(msg) { messageEl.textContent = msg; }
 
-function gcd(a, b) {
-  let x = Math.abs(a);
-  let y = Math.abs(b);
-  while (y !== 0) {
-    const t = y;
-    y = x % y;
-    x = t;
-  }
-  return x || 1;
-}
-
-function isLosBlocked(attacker, defender) {
-  if (attacker.maxRange === 1) return false;
-  const dx = defender.x - attacker.x;
-  const dy = defender.y - attacker.y;
-
-  // Keep ranged LOS deterministic and readable: orthogonal or diagonal lanes only.
-  const isOrthogonal = dx === 0 || dy === 0;
-  const isDiagonal = Math.abs(dx) === Math.abs(dy);
-  if (!(isOrthogonal || isDiagonal)) return true;
-
-  const stepDiv = gcd(dx, dy);
-  const stepX = dx / stepDiv;
-  const stepY = dy / stepDiv;
-  for (let i = 1; i < stepDiv; i++) {
-    const x = attacker.x + stepX * i;
-    const y = attacker.y + stepY * i;
-    if (isHill(x, y)) return true;
-  }
-  return false;
-}
-
-function canOccupyTile(unit, x, y) {
-  if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return false;
-  if (getUnitAt(x, y)) return false;
-  if (isHill(x, y) && !unit.canClimb) return false;
-  return true;
-}
-
-function buildPathTo(unit, targetX, targetY) {
-  const startKey = tileKey(unit.x, unit.y);
-  const queue = [{ x: unit.x, y: unit.y }];
-  const parents = new Map([[startKey, null]]);
-
-  while (queue.length > 0) {
-    const cur = queue.shift();
-    if (cur.x === targetX && cur.y === targetY) break;
-
-    const neighbors = [
-      { x: cur.x + 1, y: cur.y },
-      { x: cur.x - 1, y: cur.y },
-      { x: cur.x, y: cur.y + 1 },
-      { x: cur.x, y: cur.y - 1 },
-    ];
-
-    for (const next of neighbors) {
-      const key = tileKey(next.x, next.y);
-      if (parents.has(key)) continue;
-      if (!canOccupyTile(unit, next.x, next.y)) continue;
-      parents.set(key, cur);
-      queue.push(next);
-    }
-  }
-
-  const targetKey = tileKey(targetX, targetY);
-  if (!parents.has(targetKey)) return [];
-
-  const path = [];
-  let curKey = targetKey;
-  while (curKey && curKey !== startKey) {
-    const [x, y] = curKey.split(",").map(Number);
-    path.unshift({ x, y });
-    const parent = parents.get(curKey);
-    curKey = parent ? tileKey(parent.x, parent.y) : null;
-  }
-  return path;
-}
-
-function legalMoves(unit) {
-  const visited = new Set([tileKey(unit.x, unit.y)]);
-  const queue = [{ x: unit.x, y: unit.y, steps: 0 }];
-  const result = [];
-
-  while (queue.length > 0) {
-    const cur = queue.shift();
-    if (cur.steps >= unit.move) continue;
-
-    const neighbors = [
-      { x: cur.x + 1, y: cur.y },
-      { x: cur.x - 1, y: cur.y },
-      { x: cur.x, y: cur.y + 1 },
-      { x: cur.x, y: cur.y - 1 },
-    ];
-
-    for (const next of neighbors) {
-      const key = tileKey(next.x, next.y);
-      if (visited.has(key)) continue;
-      visited.add(key);
-      if (!canOccupyTile(unit, next.x, next.y)) continue;
-      result.push({ x: next.x, y: next.y });
-      queue.push({ x: next.x, y: next.y, steps: cur.steps + 1 });
-    }
-  }
-
-  return result;
-}
-
-function legalAttacks(unit) {
-  const enemies = state.units.filter(u => u.owner !== unit.owner);
-  return enemies.filter(enemy => {
-    const d = manhattan(unit, enemy);
-    if (d < unit.minRange || d > unit.maxRange) return false;
-    if (isLosBlocked(unit, enemy)) return false;
-    return true;
-  });
-}
-
-function threatenedTilesForUnit(unit) {
-  const threatened = new Set();
-  for (let x = 0; x < SIZE; x++) {
-    for (let y = 0; y < SIZE; y++) {
-      if (x === unit.x && y === unit.y) continue;
-      const distance = Math.abs(unit.x - x) + Math.abs(unit.y - y);
-      if (distance < unit.minRange || distance > unit.maxRange) continue;
-      if (isLosBlocked(unit, { x, y, maxRange: 1 })) continue;
-      threatened.add(tileKey(x, y));
-    }
-  }
-  return threatened;
-}
-
-function threatTiles(forPlayer) {
-  const enemies = state.units.filter(u => u.owner !== forPlayer);
-  const threat = new Set();
-  for (const enemy of enemies) {
-    for (const key of threatenedTilesForUnit(enemy)) {
-      threat.add(key);
-    }
-  }
-  return threat;
-}
-
-function calculateDamage(attacker, defender) {
-  let damage = attacker.damage;
-  const defenderOnCover = coverSet().has(tileKey(defender.x, defender.y));
-  const rangedAttack = attacker.maxRange > 1;
-  const modifiers = [];
-
-  if (defenderOnCover && rangedAttack) {
-    damage = Math.max(1, damage - 1);
-    modifiers.push("cover");
-  }
-  if (defender.type === "Tank" && rangedAttack) {
-    damage = Math.max(1, damage - 1);
-    modifiers.push("tank armor");
-  }
-
-  return { damage, modifiers };
-}
-
-function getAttackBlockReason(attacker, defender) {
-  const distance = manhattan(attacker, defender);
-  if (distance < attacker.minRange || distance > attacker.maxRange) {
-    return `Out of range (${distance}).`;
-  }
-  if (attacker.type === "Scout" && state.sprintedScouts.has(attacker.id)) {
-    return "Scout sprinted this turn and cannot attack.";
-  }
-  if (isLosBlocked(attacker, defender)) {
-    return "Hill blocks line of sight.";
-  }
-  return null;
-}
-
-function getPreviewText(x, y) {
-  const selected = getSelectedUnit();
-  if (!selected) return "Select a unit to preview moves, paths, and attacks.";
-
-  const occupant = getUnitAt(x, y);
-  const moveTarget = legalMoves(selected).find(tile => tile.x === x && tile.y === y);
-  if (moveTarget) {
-    const path = buildPathTo(selected, x, y);
-    const terrain = [
-      isHill(x, y) ? "hill" : null,
-      coverSet().has(tileKey(x, y)) ? "cover" : null,
-      threatTiles(state.current).has(tileKey(x, y)) ? "enemy threat" : null,
-    ].filter(Boolean);
-    const terrainText = terrain.length ? ` Terrain: ${terrain.join(", ")}.` : "";
-    return `Move ${selected.type} to (${x}, ${y}) in ${path.length} step${path.length === 1 ? "" : "s"}.${terrainText}`;
-  }
-
-  if (occupant && occupant.owner !== state.current) {
-    const blockedReason = getAttackBlockReason(selected, occupant);
-    if (blockedReason) {
-      return `Cannot attack ${occupant.type} at (${x}, ${y}). ${blockedReason}`;
-    }
-    const { damage, modifiers } = calculateDamage(selected, occupant);
-    const modifierText = modifiers.length ? ` Reduced by ${modifiers.join(" and ")}.` : "";
-    const lethalText = occupant.hp - damage <= 0 ? " Lethal hit." : "";
-    return `Attack ${occupant.type} for ${damage} damage.${modifierText}${lethalText}`;
-  }
-
-  if (occupant && occupant.owner === state.current) {
-    return `Friendly ${occupant.type}. Click to select it.`;
-  }
-
-  if (isHill(x, y) && !selected.canClimb) {
-    return `${selected.type} cannot climb hills.`;
-  }
-
-  return "No valid action on this tile.";
-}
-
-function addHistory(entry) { state.history.unshift(entry); state.history = state.history.slice(0, 12); }
-
-function initLegend() {
-  legendListEl.innerHTML = "";
-  ["Commander", "Soldier", "Scout", "Tank", "Artillery"].forEach(type => {
-    const canClimb = rosterTemplate.find(u => u.type === type)?.canClimb ? "can climb" : "no climb";
-    const li = document.createElement("li");
-    li.innerHTML = `<span>${unitIcons[type]}</span><span>${type} (${canClimb})</span>`;
-    legendListEl.appendChild(li);
-  });
+function setSessionId(sessionId) {
+  ui.sessionId = sessionId;
+  if (sessionId) localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
 }
 
 function initMapSelect() {
-  mapSelectEl.innerHTML = Object.entries(maps).map(([key, m]) => `<option value="${key}">${m.name}</option>`).join("");
-  mapSelectEl.value = state.mapKey;
+  mapSelectEl.innerHTML = Object.entries(maps).map(([key, map]) => `<option value="${key}">${map.name}</option>`).join('');
+  mapSelectEl.value = ui.state.mapKey;
 }
 
-function initGame() {
-  state.units = []; state.current = P1; state.round = 1; state.ap = 2; state.selectedUnitId = null;
-  state.sprintedScouts = new Set(); state.objectiveOwner = null; state.objectiveHoldPending = null;
-  state.winner = null; state.actionFeed = "No actions yet."; state.history = []; state.turnSecondsLeft = TURN_SECONDS;
-  state.hoveredTile = null;
-  threatToggleEl.checked = state.showThreatMap;
+function initLegend() {
+  legendListEl.innerHTML = '';
+  ui.state.units
+    .filter((unit, index, arr) => arr.findIndex((entry) => entry.type === unit.type) === index)
+    .forEach((unit) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${unitIcons[unit.type]}</span><span>${unit.type} (${unit.canClimb ? 'can climb' : 'no climb'})</span>`;
+      legendListEl.appendChild(li);
+    });
+}
 
-  const p1Rows = [5, 4], p2Rows = [0, 1];
-  rosterTemplate.forEach((unit, idx) => {
-    const col = idx;
-    state.units.push({ id: `p1-${idx}`, owner: P1, x: col, y: p1Rows[idx > 2 ? 1 : 0], ...structuredClone(unit) });
-    state.units.push({ id: `p2-${idx}`, owner: P2, x: col, y: p2Rows[idx > 2 ? 1 : 0], ...structuredClone(unit) });
-  });
+function getSelectedUnit() {
+  return ui.selectedUnitId ? getUnitById(ui.state, ui.selectedUnitId) : null;
+}
 
-  addHistory(`Round 1: ${state.current} starts on ${currentMap().name}.`);
-  setMessage(`${state.current} to act.`);
-  mapInfoEl.textContent = currentMap().desc;
+function canControlCurrentTurn() {
+  return ui.connection !== 'remote' || (ui.assignedSide && ui.assignedSide === ui.state.current && ui.roomId);
+}
+
+function performAction(action) {
+  if (!canControlCurrentTurn()) {
+    setMessage(ui.roomId ? `Waiting for ${ui.state.current}.` : 'Join a match to play online.');
+    return;
+  }
+  if (ui.connection === 'remote' && ui.socket?.readyState === WebSocket.OPEN) {
+    ui.socket.send(JSON.stringify(wrapMessage(MessageType.ACTION, { action })));
+    return;
+  }
+
+  try {
+    ui.state = applyAction(ui.state, action);
+    ui.selectedUnitId = null;
+    render();
+  } catch (error) {
+    setMessage(error.message);
+  }
+}
+
+function resetMatch(mapKey = ui.state.mapKey) {
+  if (ui.connection === 'remote' && ui.socket?.readyState === WebSocket.OPEN && ui.roomId) {
+    ui.socket.send(JSON.stringify(wrapMessage(MessageType.RESET_MATCH, { mapKey })));
+    return;
+  }
+  ui.state = createInitialState(mapKey);
+  ui.selectedUnitId = null;
+  ui.hoveredTile = null;
   initMapSelect();
   initLegend();
   render();
 }
 
-function resolveAttack(attacker, defender) {
-  const { damage } = calculateDamage(attacker, defender);
-
-  defender.hp -= damage;
-  state.actionFeed = `${attacker.owner} ${attacker.type} hit ${defender.owner} ${defender.type} for ${damage}.`;
-  addHistory(state.actionFeed); setMessage(state.actionFeed);
-
-  if (defender.hp <= 0) {
-    const defeatedCommander = defender.type === "Commander";
-    state.units = state.units.filter(u => u.id !== defender.id);
-    state.actionFeed = `${attacker.owner} defeated ${defender.owner} ${defender.type}!`;
-    addHistory(state.actionFeed); setMessage(state.actionFeed);
-    if (defeatedCommander) { state.winner = attacker.owner; setMessage(`${state.winner} wins by Commander KO.`); }
+function updateQueue(joinQueue) {
+  if (!ui.socket || ui.socket.readyState !== WebSocket.OPEN) {
+    connectWebSocket(true, joinQueue);
+    return;
   }
+  ui.socket.send(JSON.stringify(wrapMessage(joinQueue ? MessageType.QUEUE_JOIN : MessageType.QUEUE_LEAVE)));
+}
+
+function applyQueueStatus(msg) {
+  ui.queueStatus = msg.status ?? 'idle';
+  ui.queueDetail = msg.detail ?? ui.queueDetail;
+  if (msg.roomId) ui.roomId = msg.roomId;
+  queueStatusEl.textContent = ui.queueDetail;
+  queueStatusEl.className = ui.queueStatus;
+  queueBtnEl.disabled = ui.queueStatus === 'in_queue' || ui.queueStatus === 'in_match';
+  leaveQueueBtnEl.classList.toggle('visible', ui.queueStatus === 'in_queue');
+  leaveQueueBtnEl.disabled = ui.queueStatus !== 'in_queue';
+}
+
+function getPreviewText(x, y) {
+  const selected = getSelectedUnit();
+  if (!selected) return 'Select a unit to preview moves, paths, and attacks.';
+
+  const occupant = getUnitAt(ui.state, x, y);
+  const moveTarget = legalMoves(ui.state, selected.id).find((tile) => tile.x === x && tile.y === y);
+  if (moveTarget) {
+    const path = buildPathTo(ui.state, selected, x, y);
+    const terrain = [
+      hillSet(ui.state).has(tileKey(x, y)) ? 'hill' : null,
+      coverSet(ui.state).has(tileKey(x, y)) ? 'cover' : null,
+      threatTiles(ui.state, ui.state.current).has(tileKey(x, y)) ? 'enemy threat' : null,
+    ].filter(Boolean);
+    const terrainText = terrain.length ? ` Terrain: ${terrain.join(', ')}.` : '';
+    return `Move ${selected.type} to (${x}, ${y}) in ${path.length} step${path.length === 1 ? '' : 's'}.${terrainText}`;
+  }
+
+  if (occupant && occupant.owner !== ui.state.current) {
+    const blockedReason = getAttackBlockReason(ui.state, selected.id, occupant.id);
+    if (blockedReason) return `Cannot attack ${occupant.type} at (${x}, ${y}). ${blockedReason}`;
+    const { damage, modifiers } = calculateDamage(ui.state, selected.id, occupant.id);
+    const modifierText = modifiers.length ? ` Reduced by ${modifiers.join(' and ')}.` : '';
+    const lethalText = occupant.hp - damage <= 0 ? ' Lethal hit.' : '';
+    return `Attack ${occupant.type} for ${damage} damage.${modifierText}${lethalText}`;
+  }
+
+  if (occupant && occupant.owner === ui.state.current) return `Friendly ${occupant.type}. Click to select it.`;
+  if (hillSet(ui.state).has(tileKey(x, y)) && !selected.canClimb) return `${selected.type} cannot climb hills.`;
+  return 'No valid action on this tile.';
 }
 
 function onTileClick(x, y) {
-  if (state.winner) return;
-  const clicked = getUnitAt(x, y);
+  if (ui.state.winner || !canControlCurrentTurn()) return;
+  const clicked = getUnitAt(ui.state, x, y);
   const selected = getSelectedUnit();
-  if (!selected) { if (clicked && clicked.owner === state.current) { state.selectedUnitId = clicked.id; render(); } return; }
-  if (clicked && clicked.owner === state.current) { state.selectedUnitId = clicked.id; render(); return; }
-  if (!(selected && selected.owner === state.current && state.ap > 0)) return;
 
-  const moveTarget = legalMoves(selected).find(t => t.x === x && t.y === y);
-  if (moveTarget && state.ap >= 1) {
-    const dist = manhattan(selected, moveTarget);
-    selected.x = x; selected.y = y; state.ap -= 1;
-    if (selected.type === "Scout" && dist === 2) state.sprintedScouts.add(selected.id);
-    state.actionFeed = `${selected.owner} moved ${selected.type} to (${x}, ${y}).`;
-    addHistory(state.actionFeed); setMessage(state.actionFeed);
-    if (state.ap <= 0 && !state.winner) endTurn(); else render();
+  if (!selected) {
+    if (clicked && clicked.owner === ui.state.current) {
+      ui.selectedUnitId = clicked.id;
+      render();
+    }
     return;
   }
 
-  if (clicked && clicked.owner !== state.current) {
-    const canAttack = legalAttacks(selected).some(u => u.id === clicked.id);
-    const blockedReason = getAttackBlockReason(selected, clicked);
-    if (canAttack && !blockedReason && state.ap >= 1) {
-      resolveAttack(selected, clicked); state.ap -= 1;
-      if (state.ap <= 0 && !state.winner) endTurn(); else render();
-      return;
-    }
-    setMessage(blockedReason ?? "Attack blocked.");
+  if (clicked && clicked.owner === ui.state.current) {
+    ui.selectedUnitId = clicked.id;
+    render();
+    return;
   }
-}
 
-function evaluateObjective() {
-  const obj = objective();
-  const holder = getUnitAt(obj.x, obj.y);
-  const owner = holder?.owner ?? null;
-  if (owner !== state.objectiveOwner) { state.objectiveOwner = owner; state.objectiveHoldPending = owner; if (owner) addHistory(`${owner} captured objective.`); return; }
-  if (owner && state.objectiveHoldPending === owner) { state.winner = owner; setMessage(`${owner} wins by objective hold.`); }
-}
-
-function applyDangerRing() {
-  if (state.round < 8) return;
-  for (const unit of [...state.units]) {
-    if (unit.x === 0 || unit.x === SIZE - 1 || unit.y === 0 || unit.y === SIZE - 1) {
-      unit.hp -= 1;
-      if (unit.hp <= 0) {
-        const commander = unit.type === "Commander";
-        state.units = state.units.filter(u => u.id !== unit.id);
-        if (commander && !state.winner) { state.winner = unit.owner === P1 ? P2 : P1; setMessage(`${state.winner} wins (enemy Commander lost in danger zone).`); }
-      }
-    }
+  const moveTarget = legalMoves(ui.state, selected.id).find((tile) => tile.x === x && tile.y === y);
+  if (moveTarget) {
+    performAction({ type: ActionType.MOVE, unitId: selected.id, target: { x, y } });
+    return;
   }
-}
 
-function tiebreakWinner() {
-  const alive = owner => state.units.filter(u => u.owner === owner);
-  const p1 = alive(P1), p2 = alive(P2);
-  const p1Commander = p1.some(u => u.type === "Commander"), p2Commander = p2.some(u => u.type === "Commander");
-  if (p1Commander !== p2Commander) return p1Commander ? P1 : P2;
-  if (p1.length !== p2.length) return p1.length > p2.length ? P1 : P2;
-  if (state.objectiveOwner) return state.objectiveOwner;
-  const hp = arr => arr.reduce((sum, u) => sum + u.hp, 0);
-  if (hp(p1) !== hp(p2)) return hp(p1) > hp(p2) ? P1 : P2;
-  return null;
-}
-
-function endTurn() {
-  if (state.winner) return;
-  evaluateObjective(); if (!state.winner) applyDangerRing();
-  if (!state.winner) {
-    state.current = state.current === P1 ? P2 : P1;
-    if (state.current === P1) state.round += 1;
-    if (state.round > 20) { state.winner = tiebreakWinner(); setMessage(state.winner ? `${state.winner} wins by tiebreak.` : "Draw by tiebreak."); }
-    else { setMessage(`${state.current} to act.`); addHistory(`Round ${state.round}: ${state.current} turn.`); }
+  if (clicked && clicked.owner !== ui.state.current) {
+    performAction({ type: ActionType.ATTACK, unitId: selected.id, targetId: clicked.id });
   }
-  state.ap = 2; state.selectedUnitId = null; state.sprintedScouts.clear(); state.turnSecondsLeft = TURN_SECONDS; render();
 }
 
 function renderHudOnly() {
-  turnTimerEl.textContent = `${state.turnSecondsLeft}s`;
-  turnTimerEl.classList.remove("warning", "critical");
-  if (state.turnSecondsLeft <= 10) turnTimerEl.classList.add("warning");
-  if (state.turnSecondsLeft <= 5) turnTimerEl.classList.add("critical");
+  turnTimerEl.textContent = `${ui.state.turnSecondsLeft}s`;
+  turnTimerEl.classList.remove('warning', 'critical');
+  if (ui.state.turnSecondsLeft <= 10) turnTimerEl.classList.add('warning');
+  if (ui.state.turnSecondsLeft <= 5) turnTimerEl.classList.add('critical');
+}
+
+function connectWebSocket(manual = false, autoJoinQueue = false) {
+  if (ui.socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(ui.socket.readyState)) return;
+  const socket = new WebSocket('ws://127.0.0.1:8080');
+  ui.socket = socket;
+
+  socket.addEventListener('open', () => {
+    ui.connection = 'remote';
+    connectBtnEl.textContent = 'Connected';
+    setMessage('Connected to local WebSocket server.');
+    if (ui.sessionId) {
+      socket.send(JSON.stringify(wrapMessage(MessageType.RECONNECT_RESUME, { sessionId: ui.sessionId })));
+    } else if (autoJoinQueue) {
+      socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
+    }
+    render();
+  });
+
+  socket.addEventListener('message', (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === MessageType.SERVER_READY && msg.sessionId) {
+      setSessionId(msg.sessionId);
+      if (autoJoinQueue && !msg.resumed && !ui.roomId) {
+        socket.send(JSON.stringify(wrapMessage(MessageType.QUEUE_JOIN)));
+      }
+      return;
+    }
+    if (msg.type === MessageType.MATCH_FOUND) {
+      ui.roomId = msg.roomId;
+      setMessage(`Match found${msg.roomId ? `: ${msg.roomId.slice(0, 8)}` : ''}.`);
+      render();
+      return;
+    }
+    if (msg.type === MessageType.ASSIGNED_SIDE) {
+      ui.assignedSide = msg.side;
+      ui.roomId = msg.roomId ?? ui.roomId;
+      setMessage(`Connected as ${msg.side}.`);
+      render();
+      return;
+    }
+    if (msg.type === MessageType.QUEUE_STATUS) {
+      applyQueueStatus(msg);
+      render();
+      return;
+    }
+    if (msg.type === MessageType.STATE_SNAPSHOT) {
+      ui.state = msg.state;
+      ui.roomId = msg.roomId ?? ui.roomId;
+      if (mapSelectEl.value !== ui.state.mapKey) mapSelectEl.value = ui.state.mapKey;
+      render();
+      return;
+    }
+    if (msg.type === MessageType.ACTION_ERROR) {
+      setMessage(msg.message);
+    }
+  });
+
+  socket.addEventListener('close', () => {
+    ui.connection = 'local';
+    ui.socket = null;
+    ui.assignedSide = null;
+    ui.roomId = null;
+    ui.queueStatus = 'offline';
+    ui.queueDetail = 'Offline';
+    connectBtnEl.textContent = 'Connect Server';
+    setMessage(manual ? 'WebSocket server disconnected. Running in local mode.' : 'WebSocket server unavailable. Running in local mode.');
+    render();
+  });
+
+  socket.addEventListener('error', () => {
+    socket.close();
+  });
 }
 
 function render() {
-  boardEl.innerHTML = "";
+  boardEl.innerHTML = '';
   const selected = getSelectedUnit();
-  const moves = selected ? legalMoves(selected).map(t => tileKey(t.x, t.y)) : [];
-  const attacks = selected ? legalAttacks(selected).map(u => tileKey(u.x, u.y)) : [];
-  const threats = state.showThreatMap ? threatTiles(state.current) : new Set();
-  const hoveredPath = selected && state.hoveredTile
-    ? buildPathTo(selected, state.hoveredTile.x, state.hoveredTile.y).map(tile => tileKey(tile.x, tile.y))
-    : [];
-  const dangerOn = state.round >= 8;
-  const hills = hillSet();
-  const covers = coverSet();
-  const obj = objective();
+  const moves = selected ? legalMoves(ui.state, selected.id).map((tile) => tileKey(tile.x, tile.y)) : [];
+  const attacks = selected ? legalAttacks(ui.state, selected.id).map((unit) => tileKey(unit.x, unit.y)) : [];
+  const threats = ui.showThreatMap ? threatTiles(ui.state, ui.state.current) : new Set();
+  const hoveredPath = selected && ui.hoveredTile ? buildPathTo(ui.state, selected, ui.hoveredTile.x, ui.hoveredTile.y).map((tile) => tileKey(tile.x, tile.y)) : [];
+  const dangerOn = ui.state.round >= 8;
+  const hills = hillSet(ui.state);
+  const covers = coverSet(ui.state);
+  const obj = objective(ui.state);
 
-  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
-    const tile = document.createElement("button");
-    tile.className = "tile";
-    tile.onclick = () => onTileClick(x, y);
-    tile.onmouseenter = () => {
-      if (state.hoveredTile?.x === x && state.hoveredTile?.y === y) return;
-      state.hoveredTile = { x, y };
-      previewInfoEl.textContent = getPreviewText(x, y);
-      render();
-    };
-    tile.onfocus = () => {
-      if (state.hoveredTile?.x === x && state.hoveredTile?.y === y) return;
-      state.hoveredTile = { x, y };
-      previewInfoEl.textContent = getPreviewText(x, y);
-      render();
-    };
-    const unit = getUnitAt(x, y);
+  for (let y = 0; y < 6; y++) {
+    for (let x = 0; x < 6; x++) {
+      const tile = document.createElement('button');
+      tile.className = 'tile';
+      tile.onclick = () => onTileClick(x, y);
+      tile.onmouseenter = () => {
+        if (ui.hoveredTile?.x === x && ui.hoveredTile?.y === y) return;
+        ui.hoveredTile = { x, y };
+        previewInfoEl.textContent = getPreviewText(x, y);
+        render();
+      };
+      tile.onfocus = tile.onmouseenter;
 
-    if (x === obj.x && y === obj.y) tile.classList.add("objective");
-    if (covers.has(tileKey(x, y))) tile.classList.add("cover");
-    if (hills.has(tileKey(x, y))) tile.classList.add("hill");
-    if (dangerOn && (x === 0 || y === 0 || x === SIZE - 1 || y === SIZE - 1)) tile.classList.add("danger");
-    if (selected?.x === x && selected?.y === y) tile.classList.add("selected");
-    if (moves.includes(tileKey(x, y))) tile.classList.add("selectable");
-    if (attacks.includes(tileKey(x, y))) tile.classList.add("attackable");
-    if (hoveredPath.includes(tileKey(x, y))) tile.classList.add("path");
-    if (threats.has(tileKey(x, y))) tile.classList.add("threat");
+      const unit = getUnitAt(ui.state, x, y);
+      if (x === obj.x && y === obj.y) tile.classList.add('objective');
+      if (covers.has(tileKey(x, y))) tile.classList.add('cover');
+      if (hills.has(tileKey(x, y))) tile.classList.add('hill');
+      if (dangerOn && (x === 0 || y === 0 || x === 5 || y === 5)) tile.classList.add('danger');
+      if (selected?.x === x && selected?.y === y) tile.classList.add('selected');
+      if (moves.includes(tileKey(x, y))) tile.classList.add('selectable');
+      if (attacks.includes(tileKey(x, y))) tile.classList.add('attackable');
+      if (hoveredPath.includes(tileKey(x, y))) tile.classList.add('path');
+      if (threats.has(tileKey(x, y))) tile.classList.add('threat');
+      tile.disabled = !canControlCurrentTurn() && !(selected?.x === x && selected?.y === y);
 
-    if (unit) {
-      tile.classList.add(unit.owner === P1 ? "p1" : "p2");
-      tile.innerHTML = `<span class="unit-token" title="${unit.owner} ${unit.type}">${unitIcons[unit.type] ?? "?"}</span><span class="hp-badge">${unit.hp}</span>`;
+      if (unit) {
+        tile.classList.add(unit.owner === P1 ? 'p1' : 'p2');
+        tile.innerHTML = `<span class="unit-token" title="${unit.owner} ${unit.type}">${unitIcons[unit.type] ?? '?'}</span><span class="hp-badge">${unit.hp}</span>`;
+      }
+      boardEl.appendChild(tile);
     }
-    boardEl.appendChild(tile);
   }
 
-  turnPlayerEl.textContent = state.winner ? `Game over (${state.winner})` : state.current;
-  roundNumEl.textContent = String(state.round);
-  apLeftEl.textContent = String(state.ap);
-  objectiveStatusEl.textContent = state.objectiveOwner ?? "Neutral";
-  actionFeedEl.textContent = state.actionFeed;
-  historyFeedEl.innerHTML = state.history.map(entry => `<li>${entry}</li>`).join("");
-  mapInfoEl.textContent = currentMap().desc;
+  turnPlayerEl.textContent = ui.state.winner ? `Game over (${ui.state.winner})` : ui.state.current;
+  roundNumEl.textContent = String(ui.state.round);
+  apLeftEl.textContent = String(ui.state.ap);
+  objectiveStatusEl.textContent = ui.state.objectiveOwner ?? 'Neutral';
+  connectionModeEl.textContent = ui.connection === 'remote' ? 'Online' : 'Local';
+  connectionModeEl.className = ui.connection;
+  playerSideEl.textContent = ui.assignedSide ?? 'Any';
+  queueStatusEl.textContent = ui.queueDetail;
+  queueStatusEl.className = ui.queueStatus;
+  actionFeedEl.textContent = ui.state.actionFeed;
+  historyFeedEl.innerHTML = ui.state.history.map((entry) => `<li>${entry}</li>`).join('');
+  mapInfoEl.textContent = `${currentMap(ui.state).desc}${ui.connection === 'remote' ? ` Connected as ${ui.assignedSide ?? 'unassigned'}. ${ui.roomId ? `Room ${ui.roomId.slice(0, 8)}.` : 'Not currently in a room.'}` : ' Local mode.'}`;
   renderHudOnly();
-  previewInfoEl.textContent = state.hoveredTile ? getPreviewText(state.hoveredTile.x, state.hoveredTile.y) : "Hover or focus a tile to preview move paths, attacks, and invalid reasons.";
-
+  previewInfoEl.textContent = ui.hoveredTile ? getPreviewText(ui.hoveredTile.x, ui.hoveredTile.y) : 'Hover or focus a tile to preview move paths, attacks, and invalid reasons.';
+  rematchBtnEl.classList.toggle('visible', Boolean(ui.state.winner));
+  queueBtnEl.disabled = ui.connection !== 'remote' && ui.socket?.readyState !== WebSocket.CONNECTING;
   unitInfoEl.textContent = selected
-    ? `${unitIcons[selected.type] ?? "?"} ${selected.owner} ${selected.type}\nHP: ${selected.hp}\nMove: ${selected.move}\nRange: ${selected.minRange}-${selected.maxRange}\nDamage: ${selected.damage}\nClimb Hills: ${selected.canClimb ? "Yes" : "No"}`
-    : "None";
+    ? `${unitIcons[selected.type] ?? '?'} ${selected.owner} ${selected.type}\nHP: ${selected.hp}\nMove: ${selected.move}\nRange: ${selected.minRange}-${selected.maxRange}\nDamage: ${selected.damage}\nClimb Hills: ${selected.canClimb ? 'Yes' : 'No'}`
+    : 'None';
 }
 
-function setMessage(msg) { messageEl.textContent = msg; }
-
 initMapSelect();
-initGame();
+initLegend();
+render();
+connectWebSocket();

@@ -5,6 +5,14 @@ body { margin: 0; background: radial-gradient(circle at top, #182537, #0e141d 60
 .hud { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-bottom: 1rem; padding: .6rem .8rem; border: 1px solid #2e3b4e; border-radius: 10px; background: rgba(23, 33, 45, 0.85); }
 button, select { padding: .45rem .75rem; border-radius: 8px; border: 1px solid #566; }
 .toggle { display: inline-flex; align-items: center; gap: .35rem; font-size: .9rem; }
+#connectionMode.online { color: #7ce0a2; }
+#connectionMode.local { color: #f0c676; }
+#rematchBtn { display: none; }
+#rematchBtn.visible { display: inline-block; }
+#leaveQueueBtn { display: none; }
+#leaveQueueBtn.visible { display: inline-block; }
+#queueStatus.in_queue { color: #7ec8ff; }
+#queueStatus.in_match { color: #7ce0a2; }
 #turnTimer.warning { color: #ffd86e; }
 #turnTimer.critical { color: #ff8b8b; animation: timerPulse .7s infinite alternate; }
 
