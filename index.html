@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini War MVP</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header>
+      <h1>Mini War MVP</h1>
+      <p>Now with map selection, hill terrain, LOS blocking, and unit climb rules.</p>
+    </header>
+
+    <section class="hud">
+      <div><strong>Turn:</strong> <span id="turnPlayer"></span></div>
+      <div><strong>Round:</strong> <span id="roundNum"></span></div>
+      <div><strong>AP:</strong> <span id="apLeft"></span></div>
+      <div><strong>Timer:</strong> <span id="turnTimer"></span></div>
+      <div><strong>Objective:</strong> <span id="objectiveStatus"></span></div>
+      <div><strong>Mode:</strong> <span id="connectionMode"></span></div>
+      <div><strong>Side:</strong> <span id="playerSide"></span></div>
+      <div><strong>Queue:</strong> <span id="queueStatus">Offline</span></div>
+      <label>
+        <strong>Map:</strong>
+        <select id="mapSelect"></select>
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="threatToggle" checked />
+        Show Threat Map
+      </label>
+      <button id="connectBtn">Connect Server</button>
+      <button id="queueBtn">Join Queue</button>
+      <button id="leaveQueueBtn">Leave Queue</button>
+      <button id="endTurnBtn">End Turn</button>
+      <button id="resetBtn">Reset Match</button>
+      <button id="rematchBtn">Rematch</button>
+    </section>
+
+    <section class="layout">
+      <div>
+        <div id="board" class="board" aria-label="Mini War board"></div>
+        <section class="preview-panel">
+          <h3>Action Preview</h3>
+          <p id="previewInfo">Hover or focus a tile to preview move paths, attacks, and invalid reasons.</p>
+        </section>
+      </div>
+      <aside class="panel">
+        <h2>Selected Unit</h2>
+        <pre id="unitInfo">None</pre>
+
+        <h3>Terrain</h3>
+        <p id="mapInfo">-</p>
+
+        <h3>Unit Icons</h3>
+        <ul class="legend" id="legendList"></ul>
+
+        <h3>Recent Action</h3>
+        <p id="actionFeed">No actions yet.</p>
+
+        <h3>Action History</h3>
+        <ol id="historyFeed" class="history"></ol>
+      </aside>
+    </section>
+
+    <p id="message" class="message"></p>
+  </main>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
